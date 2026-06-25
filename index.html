@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>MiniMax 文生图 - 本地测试</title>
+    <!-- JSZip：用于把多张图片打包成 zip 一次下载 -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
     <style>
       * {
         box-sizing: border-box;
@@ -1131,44 +1134,71 @@
             alert("暂无历史图片可下载");
             return;
           }
-          if (!confirm(`即将下载 ${items.length} 张历史图片。\n\n浏览器可能会询问"允许下载多个文件"，请选择允许。\n\n继续吗？`)) {
+          // 依赖检查：JSZip 来自 CDN，离线 / 被墙时会失败
+          if (typeof JSZip === "undefined") {
+            alert("JSZip 未加载，请检查网络（CDN 被墙时会失败）。\n可尝试切换网络后刷新页面。");
             return;
           }
+          if (!confirm(`即将打包下载 ${items.length} 张历史图片为 1 个 zip 文件。\n\n继续吗？`)) {
+            return;
+          }
+
           // 锁定按钮
           downloadAllBtn.disabled = true;
           const originalText = downloadAllBtn.textContent;
+
+          const zip = new JSZip();
           let success = 0;
           let fail = 0;
+          const failed = []; // 收集失败的 URL，便于回退
+
+          // 第一阶段：拉取所有图片并写入 zip
           for (let i = 0; i < items.length; i++) {
             const it = items[i];
             const ext = guessExt(it.url);
             const filename = `minimax_${tsLabel(it.ts)}_${i + 1}.${ext}`;
-            downloadAllBtn.textContent = `⏳ ${i + 1}/${items.length}`;
+            downloadAllBtn.textContent = `⏳ 打包 ${i + 1}/${items.length}`;
             const blob = await urlToBlob(it.url);
             if (blob) {
-              downloadBlob(blob, filename);
+              zip.file(filename, blob);
               success++;
             } else {
-              // 兜底：直接打开图片（让用户右键另存为）
-              const a = document.createElement("a");
-              a.href = it.url;
-              a.target = "_blank";
-              a.rel = "noopener noreferrer";
-              a.download = filename;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
               fail++;
+              failed.push(it.url);
             }
-            // 间隔，避免浏览器拦截密集下载
-            await new Promise((r) => setTimeout(r, 250));
           }
-          downloadAllBtn.disabled = false;
-          downloadAllBtn.textContent = originalText;
-          if (fail === 0) {
-            flashMessage(`✅ 已下载 ${success} 张图片`);
-          } else {
-            flashMessage(`⚠️ 完成：${success} 成功，${fail} 张已在新标签页打开`);
+
+          // 第二阶段：生成 zip
+          if (success === 0) {
+            // 一张都没拿到，直接放弃打包
+            downloadAllBtn.disabled = false;
+            downloadAllBtn.textContent = originalText;
+            alert(`所有 ${fail} 张图片均获取失败（CORS 拦截），无法打包。`);
+            return;
+          }
+
+          try {
+            downloadAllBtn.textContent = `⏳ 压缩中...`;
+            const zipBlob = await zip.generateAsync(
+              { type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } },
+              // 可选的进度回调（这里 UI 已经定住，不重复刷新）
+              undefined,
+            );
+            const zipName = `minimax_images_${tsLabel(Date.now())}.zip`;
+            downloadBlob(zipBlob, zipName);
+
+            if (fail === 0) {
+              flashMessage(`✅ 已打包 ${success} 张图片 → ${zipName}`);
+            } else {
+              flashMessage(`⚠️ 打包完成：${success} 成功，${fail} 张失败（CORS，已跳过）`);
+              console.warn("以下图片因 CORS 跳过，未进入 zip：", failed);
+            }
+          } catch (e) {
+            alert("压缩 zip 失败：" + e.message);
+            console.error("JSZip generateAsync 失败：", e);
+          } finally {
+            downloadAllBtn.disabled = false;
+            downloadAllBtn.textContent = originalText;
           }
         });
         // 简易 flash 消息
