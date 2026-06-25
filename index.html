@@ -248,22 +248,33 @@
       }
       .sidebar-actions {
         display: flex;
+        flex-wrap: wrap;
         gap: 6px;
         margin-bottom: 12px;
       }
       .sidebar-actions button {
-        flex: 1;
-        padding: 8px 10px;
+        flex: 1 1 calc(50% - 3px);
+        min-width: 0;
+        padding: 8px 6px;
         font-size: 12px;
         background: #fff;
         color: #555;
         border: 1px solid #ccc;
         min-height: 36px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .sidebar-actions button:hover {
         background: #f5f5f5;
         color: #c62828;
         border-color: #c62828;
+      }
+      .sidebar-actions button:disabled {
+        background: #f5f5f5;
+        color: #999;
+        border-color: #ddd;
+        cursor: not-allowed;
       }
       .history-list {
         list-style: none;
@@ -576,6 +587,7 @@
         </div>
         <div class="sidebar-actions">
           <button id="exportHistoryBtn">📥 导出</button>
+          <button id="downloadAllBtn">📦 下载全部图片</button>
           <button id="clearHistoryBtn">🗑️ 清空</button>
         </div>
         <ul id="historyList" class="history-list"></ul>
@@ -634,6 +646,7 @@
         const historyList = document.getElementById("historyList");
         const historyCount = document.getElementById("historyCount");
         const emptyTip = document.getElementById("emptyTip");
+        const downloadAllBtn = document.getElementById("downloadAllBtn");
         const clearHistoryBtn = document.getElementById("clearHistoryBtn");
         const exportHistoryBtn = document.getElementById("exportHistoryBtn");
         const keyStatus = document.getElementById("keyStatus");
@@ -1055,6 +1068,109 @@
           URL.revokeObjectURL(url);
         });
 
+
+        // ========== 一键下载全部历史图片 ==========
+        // 收集所有历史图片（按时间排序，去重）
+        function collectAllImageUrls() {
+          const list = loadHistory();
+          const seen = new Set();
+          const items = []; // { url, ts, idx }
+          // 按时间从旧到新排序，文件名前缀保证下载顺序可读
+          const sorted = list.slice().sort((a, b) => a.timestamp - b.timestamp);
+          sorted.forEach((h) => {
+            (h.urls || []).forEach((u, i) => {
+              if (seen.has(u)) return;
+              seen.add(u);
+              items.push({ url: u, ts: h.timestamp, idxInEntry: i });
+            });
+          });
+          return items;
+        }
+
+        // 把 URL 转成 Blob（fetch 方式，跨域图可能因 CORS 失败，回退直接打开）
+        async function urlToBlob(url) {
+          try {
+            const resp = await fetch(url, { mode: "cors", cache: "force-cache" });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return await resp.blob();
+          } catch (e) {
+            // CORS 失败时直接返回 null，调用方改用 <a download> 兜底
+            return null;
+          }
+        }
+
+        // 触发浏览器下载（从 blob）
+        function downloadBlob(blob, filename) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        // 根据 URL 推断扩展名
+        function guessExt(url) {
+          const m = url.match(/\.(jpe?g|png|webp|gif|bmp)(?:\?|#|$)/i);
+          if (m) return m[1].toLowerCase().replace("jpeg", "jpg");
+          return "jpg";
+        }
+
+        // 格式化时间戳为文件名片段
+        function tsLabel(ts) {
+          const d = new Date(ts);
+          const pad = (n) => String(n).padStart(2, "0");
+          return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+        }
+
+        downloadAllBtn.addEventListener("click", async () => {
+          const items = collectAllImageUrls();
+          if (items.length === 0) {
+            alert("暂无历史图片可下载");
+            return;
+          }
+          if (!confirm(`即将下载 ${items.length} 张历史图片。\n\n浏览器可能会询问"允许下载多个文件"，请选择允许。\n\n继续吗？`)) {
+            return;
+          }
+          // 锁定按钮
+          downloadAllBtn.disabled = true;
+          const originalText = downloadAllBtn.textContent;
+          let success = 0;
+          let fail = 0;
+          for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            const ext = guessExt(it.url);
+            const filename = `minimax_${tsLabel(it.ts)}_${i + 1}.${ext}`;
+            downloadAllBtn.textContent = `⏳ ${i + 1}/${items.length}`;
+            const blob = await urlToBlob(it.url);
+            if (blob) {
+              downloadBlob(blob, filename);
+              success++;
+            } else {
+              // 兜底：直接打开图片（让用户右键另存为）
+              const a = document.createElement("a");
+              a.href = it.url;
+              a.target = "_blank";
+              a.rel = "noopener noreferrer";
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              fail++;
+            }
+            // 间隔，避免浏览器拦截密集下载
+            await new Promise((r) => setTimeout(r, 250));
+          }
+          downloadAllBtn.disabled = false;
+          downloadAllBtn.textContent = originalText;
+          if (fail === 0) {
+            flashMessage(`✅ 已下载 ${success} 张图片`);
+          } else {
+            flashMessage(`⚠️ 完成：${success} 成功，${fail} 张已在新标签页打开`);
+          }
+        });
         // 简易 flash 消息
         function flashMessage(text) {
           const el = document.createElement("div");
