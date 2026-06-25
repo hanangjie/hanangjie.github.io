@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>MiniMax 文生图 - 本地测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; }
+        input, button { padding: 10px; font-size: 16px; }
+        input { width: 60%; }
+        button { cursor: pointer; }
+        #result { margin-top: 20px; }
+        img { max-width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .error { color: red; white-space: pre-wrap; word-break: break-all; }
+        .loading { color: #666; }
+    </style>
+</head>
+<body>
+
+    <h2>🎨 MiniMax 文生图 (前端直调)</h2>
+    <p style="color: #d32f2f; font-weight: bold;">
+        ⚠️ 警告：API Key 会暴露在前端，仅限本地测试使用，切勿用于生产环境！
+    </p>
+
+    <div>
+        <label>🔑 API Key (预留位置):</label><br />
+        <input id="apiKeyInput" type="password" placeholder="请输入你的 API Key" style="width:100%; margin: 8px 0;" />
+    </div>
+    <div>
+        <label>📝 图片描述 (Prompt):</label><br />
+        <input id="promptInput" type="text" value="一只可爱的柴犬戴着墨镜，在海滩上奔跑，电影质感" style="width:100%; margin: 8px 0;" />
+    </div>
+    <button id="generateBtn">🚀 生成图片</button>
+
+    <div id="result"></div>
+
+    <script>
+        (function() {
+            const API_URL = 'https://api.minimaxi.com/v1/image_generation';
+            const generateBtn = document.getElementById('generateBtn');
+            const resultDiv = document.getElementById('result');
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            const promptInput = document.getElementById('promptInput');
+
+            // 如果你不想每次输入 Key，可以在这里直接写死（仅本地测试用）
+            // const FIXED_KEY = 'YOUR_API_KEY_HERE'; 
+            // 取消注释上一行，并注释掉下面读取 input 的逻辑，即可固定 Key
+
+            generateBtn.addEventListener('click', async () => {
+                const API_KEY = apiKeyInput.value.trim();
+                const prompt = promptInput.value.trim();
+
+                // 校验
+                if (!API_KEY) {
+                    resultDiv.innerHTML = '<div class="error">❌ 请先填写你的 API Key。</div>';
+                    return;
+                }
+                if (!prompt) {
+                    resultDiv.innerHTML = '<div class="error">❌ 请填写图片描述。</div>';
+                    return;
+                }
+
+                // 显示加载中
+                resultDiv.innerHTML = '<div class="loading">⏳ 生成中，请稍候...</div>';
+
+                try {
+                    const requestBody = {
+                        model: 'image-01',          // 可选 image-01 或 image-01-live
+                        prompt: prompt,
+                        aspect_ratio: '1:1',        // 可改为 16:9, 4:3 等
+                        n: 1,                       // 生成数量 1-9
+                        prompt_optimizer: true,     // 开启自动优化
+                        response_format: 'url',     // 返回 url 或 base64
+                        // 可选: width, height, seed, style 等
+                    };
+
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${API_KEY}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(requestBody),
+                    });
+
+                    // 解析响应（无论成功失败都先获取文本，便于调试）
+                    const responseText = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(responseText);
+                    } catch (e) {
+                        throw new Error(`返回数据非 JSON: ${responseText}`);
+                    }
+
+                    // 检查 HTTP 状态
+                    if (!response.ok) {
+                        const msg = data?.base_resp?.status_msg || data?.error?.message || JSON.stringify(data);
+                        throw new Error(`HTTP ${response.status}: ${msg}`);
+                    }
+
+                    // 检查业务状态码
+                    const statusCode = data?.base_resp?.status_code;
+                    if (statusCode && statusCode !== 0) {
+                        const msg = data?.base_resp?.status_msg || '未知业务错误';
+                        throw new Error(`业务错误 (${statusCode}): ${msg}`);
+                    }
+
+                    // 提取图片 URL
+                    const urls = data?.data?.image_urls || [];
+                    if (urls.length === 0) {
+                        // 有些时候可能返回 base64 或不同字段，打印完整数据便于排查
+                        console.warn('完整响应数据:', data);
+                        throw new Error('未返回图片 URL，请检查控制台输出。');
+                    }
+
+                    // 渲染图片
+                    resultDiv.innerHTML = urls.map(url => 
+                        `<div style="margin-bottom: 15px;"><img src="${url}" alt="生成的图片" /></div>`
+                    ).join('');
+
+                } catch (error) {
+                    resultDiv.innerHTML = `<div class="error">❌ 生成失败:<br />${error.message}</div>`;
+                    console.error('详细错误:', error);
+                }
+            });
+
+            // 按回车键触发生成
+            promptInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') generateBtn.click();
+            });
+            apiKeyInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') generateBtn.click();
+            });
+        })();
+    </script>
+</body>
+</html>
