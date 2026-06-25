@@ -213,6 +213,31 @@
         gap: 8px;
       }
       .result-grid .result-img { margin-bottom: 0; }
+      .history-banner {
+        background: #e3f2fd;
+        color: #0d47a1;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        margin-bottom: 12px;
+        border-left: 4px solid #1976d2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .history-banner button {
+        background: transparent;
+        color: #1976d2;
+        border: 1px solid #1976d2;
+        padding: 4px 10px;
+        font-size: 12px;
+        border-radius: 4px;
+        min-height: auto;
+        cursor: pointer;
+      }
+      .history-banner button:hover { background: #1976d2; color: #fff; }
 
       /* ========== 侧边栏 / 历史 ========== */
       .sidebar-header {
@@ -716,9 +741,20 @@
           renderHistory();
         }
         function removeHistory(timestamp) {
+          const entry = loadHistory().find((h) => h.timestamp === timestamp);
+          if (!entry) return;
+          // 二次确认：显示 prompt 前 30 字
+          const preview = entry.prompt.length > 30
+            ? entry.prompt.slice(0, 30) + "…"
+            : entry.prompt;
+          const urlCount = (entry.urls || []).length;
+          if (!confirm(`确定删除这条历史吗？\n\n提示词：${preview}\n图片：${urlCount} 张\n\n此操作不可恢复。`)) {
+            return;
+          }
           const list = loadHistory().filter((h) => h.timestamp !== timestamp);
           saveHistory(list);
           renderHistory();
+          flashMessage("已删除 1 条历史");
         }
         function clearHistory() {
           if (!confirm("确定清空所有历史提示词吗？")) return;
@@ -770,10 +806,38 @@
           const entry = loadHistory().find((h) => h.timestamp === ts);
           if (!entry) return;
           promptInput.value = entry.prompt;
-          promptInput.focus();
+          // 在结果区渲染该条历史的图片（无需重新请求 API）
+          renderHistoryImages(entry);
           // 移动端切回主面板
           if (isMobile()) switchTab("main");
           window.scrollTo({ top: 0, behavior: "smooth" });
+          promptInput.focus();
+        }
+
+        // 把历史里的图片渲染到主结果区（与"生成图片"结果样式一致）
+        function renderHistoryImages(entry) {
+          const urls = entry.urls || [];
+          if (urls.length === 0) {
+            resultDiv.innerHTML =
+              '<div class="loading">📌 已加载历史提示词（此条无图片记录）</div>';
+            return;
+          }
+          const stamp = formatTime(entry.timestamp);
+          const banner = `<div class="history-banner">
+            <span>📌 历史结果 · ${escapeHtml(stamp)} · 共 ${urls.length} 张</span>
+            <button id="regenerateFromHistory" type="button">🔄 重新生成</button>
+          </div>`;
+          const useGrid = isMobile() && urls.length > 1;
+          const imgsHtml = urls
+            .map(
+              (url) =>
+                `<img src="${url}" data-full="${url}" alt="历史图片" class="result-img" loading="lazy" />`,
+            )
+            .join("");
+          const imgsWrap = useGrid
+            ? `<div class="result-grid">${imgsHtml}</div>`
+            : imgsHtml;
+          resultDiv.innerHTML = banner + imgsWrap;
         }
         historyList.addEventListener("click", (e) => {
           const delBtn = e.target.closest("[data-del]");
@@ -1096,6 +1160,11 @@
 
         // 结果区图片灯箱（传入整组图片，支持左右切换）
         resultDiv.addEventListener("click", (e) => {
+          // 重新生成按钮
+          if (e.target.id === "regenerateFromHistory") {
+            generateBtn.click();
+            return;
+          }
           const img = e.target.closest("img.result-img");
           if (!img) return;
           // 收集当前结果区所有图片
