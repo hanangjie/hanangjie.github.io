@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>图片展示</title>
+    <style>
+        body { background: #f5f5f5; font-family: sans-serif; padding: 20px; margin: 0; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        .grid img {
+            width: 100%;
+            aspect-ratio: 3/4;
+            object-fit: cover;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .grid img:hover { transform: scale(1.02); box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
+        .lightbox {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+            display: none; align-items: center; justify-content: center; z-index: 999;
+        }
+        .lightbox.show { display: flex; }
+        .lightbox img { max-width: 90%; max-height: 90%; border-radius: 10px; }
+        .loading { text-align: center; padding: 40px; color: #888; }
+    </style>
+</head>
+<body>
+<div id="app"><div class="loading">加载中...</div></div>
+<div class="lightbox" id="lightbox" onclick="this.classList.remove('show')">
+    <img id="lightboxImg" src="" alt="preview" />
+</div>
+
+<script>
+(async function() {
+    try {
+        const res = await fetch('./minimax_history_2026-06-26.json');  // 请确保文件名正确
+        if (!res.ok) throw new Error('网络错误 ' + res.status);
+        const data = await res.json();
+        
+        let allUrls = [];
+        data.forEach(item => {
+            if (item.urls && Array.isArray(item.urls)) {
+                allUrls = allUrls.concat(item.urls);
+            }
+        });
+
+        if (allUrls.length === 0) {
+            document.getElementById('app').innerHTML = '<p style="text-align:center;color:#999;">没有找到图片</p>';
+            return;
+        }
+
+        let html = '<div class="grid">';
+        allUrls.forEach(url => {
+            html += `<img src="${url}" loading="lazy" onclick="openLightbox(this.src)" />`;
+        });
+        html += '</div>';
+        document.getElementById('app').innerHTML = html;
+    } catch (e) {
+        document.getElementById('app').innerHTML = `<p style="text-align:center;color:#c33;">加载失败：${e.message}</p>`;
+    }
+})();
+
+function openLightbox(src) {
+    document.getElementById('lightboxImg').src = src;
+    document.getElementById('lightbox').classList.add('show');
+}
+</script>
+</body>
+</html>
