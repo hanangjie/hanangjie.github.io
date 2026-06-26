@@ -3,13 +3,17 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>图片展示</title>
+    <title>图片展示 + 链接分组</title>
     <style>
         body { background: #f5f5f5; font-family: sans-serif; padding: 20px; margin: 0; }
+        .loading { text-align: center; padding: 40px; color: #888; }
+
+        /* 图片网格 */
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 10px;
+            margin-bottom: 40px;
         }
         .grid img {
             width: 100%;
@@ -20,17 +24,89 @@
             transition: 0.2s;
         }
         .grid img:hover { transform: scale(1.02); box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
+
+        /* 灯箱 */
         .lightbox {
             position: fixed; inset: 0; background: rgba(0,0,0,0.85);
             display: none; align-items: center; justify-content: center; z-index: 999;
         }
         .lightbox.show { display: flex; }
         .lightbox img { max-width: 90%; max-height: 90%; border-radius: 10px; }
-        .loading { text-align: center; padding: 40px; color: #888; }
+
+        /* 链接分组区域 */
+        .link-section {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+        }
+        .link-section h2 {
+            font-size: 18px;
+            margin: 0 0 16px;
+            color: #333;
+        }
+        .link-group {
+            margin-bottom: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .link-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fafafa;
+            padding: 8px 14px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .link-group-header span {
+            font-weight: 500;
+            color: #555;
+        }
+        .copy-btn {
+            background: #4a90d9;
+            color: #fff;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: 0.2s;
+        }
+        .copy-btn:hover { background: #357abd; }
+        .copy-btn.copied { background: #27ae60; }
+        .link-group textarea {
+            width: 100%;
+            height: 120px;
+            border: none;
+            padding: 12px 14px;
+            font-family: monospace;
+            font-size: 12px;
+            resize: vertical;
+            outline: none;
+            box-sizing: border-box;
+            background: #f9f9f9;
+            color: #333;
+            line-height: 1.6;
+        }
+        .link-group textarea:focus { background: #fff; }
+        .stats {
+            text-align: center;
+            color: #999;
+            margin-top: 12px;
+            font-size: 13px;
+        }
+        @media (max-width: 640px) {
+            .grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+            .link-section { padding: 14px; }
+        }
     </style>
 </head>
 <body>
+
 <div id="app"><div class="loading">加载中...</div></div>
+
+<!-- 灯箱 -->
 <div class="lightbox" id="lightbox" onclick="this.classList.remove('show')">
     <img id="lightboxImg" src="" alt="preview" />
 </div>
@@ -38,10 +114,11 @@
 <script>
 (async function() {
     try {
-        const res = await fetch('./minimax_history_2026-06-26.json');  // 请确保文件名正确
+        const res = await fetch('./minimax_history_2026-06-26.json');
         if (!res.ok) throw new Error('网络错误 ' + res.status);
         const data = await res.json();
-        
+
+        // 提取所有 url
         let allUrls = [];
         data.forEach(item => {
             if (item.urls && Array.isArray(item.urls)) {
@@ -54,12 +131,67 @@
             return;
         }
 
-        let html = '<div class="grid">';
+        // ---- 构建图片网格 ----
+        let gridHtml = '<div class="grid">';
         allUrls.forEach(url => {
-            html += `<img src="${url}" loading="lazy" onclick="openLightbox(this.src)" />`;
+            gridHtml += `<img src="${url}" loading="lazy" onclick="openLightbox(this.src)" />`;
         });
-        html += '</div>';
-        document.getElementById('app').innerHTML = html;
+        gridHtml += '</div>';
+
+        // ---- 构建链接分组 (每50个一组) ----
+        const GROUP_SIZE = 50;
+        let groups = [];
+        for (let i = 0; i < allUrls.length; i += GROUP_SIZE) {
+            groups.push(allUrls.slice(i, i + GROUP_SIZE));
+        }
+
+        let linkSectionHtml = `
+            <div class="link-section">
+                <h2>📎 图片链接（共 ${allUrls.length} 个，每 ${GROUP_SIZE} 个一组）</h2>
+                <div class="stats">点击复制按钮即可复制整组链接（每行一个）</div>
+        `;
+
+        groups.forEach((group, index) => {
+            const start = index * GROUP_SIZE + 1;
+            const end = Math.min((index + 1) * GROUP_SIZE, allUrls.length);
+            const groupId = 'group-' + index;
+            linkSectionHtml += `
+                <div class="link-group">
+                    <div class="link-group-header">
+                        <span>第 ${start}-${end} 个 (共 ${group.length} 个)</span>
+                        <button class="copy-btn" data-group-id="${groupId}">复制</button>
+                    </div>
+                    <textarea id="${groupId}" readonly>${group.join('\n')}</textarea>
+                </div>
+            `;
+        });
+
+        linkSectionHtml += '</div>'; // 关闭 link-section
+
+        // 合并到 app
+        document.getElementById('app').innerHTML = gridHtml + linkSectionHtml;
+
+        // ---- 绑定复制事件 ----
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.addEventListener('click', async function(e) {
+                const groupId = this.dataset.groupId;
+                const textarea = document.getElementById(groupId);
+                if (!textarea) return;
+                try {
+                    await navigator.clipboard.writeText(textarea.value);
+                    // 视觉反馈
+                    this.textContent = '已复制 ✓';
+                    this.classList.add('copied');
+                    setTimeout(() => {
+                        this.textContent = '复制';
+                        this.classList.remove('copied');
+                    }, 2000);
+                } catch (err) {
+                    alert('复制失败，请手动选择后 Ctrl+C');
+                }
+            });
+        });
+
     } catch (e) {
         document.getElementById('app').innerHTML = `<p style="text-align:center;color:#c33;">加载失败：${e.message}</p>`;
     }
