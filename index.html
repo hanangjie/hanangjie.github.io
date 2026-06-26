@@ -1272,7 +1272,10 @@
             if (statusCode && statusCode !== 0) {
               throw new Error(`业务错误 (${statusCode}): ${data?.base_resp?.status_msg || "未知错误"}`);
             }
-            const urls = data?.data?.image_urls || [];
+            
+            const base64s = data?.data?.image_base64s || [];
+const urls = base64s.map(b64 => `data:image/png;base64,${b64}`);
+
             if (urls.length === 0) {
               console.warn("完整响应数据:", data);
               throw new Error("未返回图片 URL，请检查控制台输出。");
