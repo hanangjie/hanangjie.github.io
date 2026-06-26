@@ -1273,7 +1273,7 @@
               throw new Error(`业务错误 (${statusCode}): ${data?.base_resp?.status_msg || "未知错误"}`);
             }
             
-            const base64s = data?.data?.image_base64s || [];
+            const base64s = data?.data?.image_base64 || [];
 const urls = base64s.map(b64 => `data:image/png;base64,${b64}`);
 
             if (urls.length === 0) {
