@@ -3,21 +3,33 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>图片展示</title>
+    <title>图片展示 + 批量下载</title>
+    <!-- 引入 JSZip -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
-        body { background: #f5f5f5; font-family: sans-serif; padding: 20px; margin: 0; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #f5f5f5; font-family: sans-serif; padding: 20px; }
+        .toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
+        }
+        .toolbar h1 { font-size: 22px; color: #333; }
+        .btn {
+            background: #4a90d9; color: #fff; border: none; padding: 10px 24px;
+            border-radius: 8px; font-size: 15px; cursor: pointer; transition: 0.2s;
+        }
+        .btn:hover { background: #357abd; }
+        .btn:disabled { background: #aaa; cursor: not-allowed; }
+        .status { font-size: 14px; color: #666; }
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 10px;
         }
         .grid img {
-            width: 100%;
-            aspect-ratio: 3/4;
-            object-fit: cover;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: 0.2s;
+            width: 100%; aspect-ratio: 3/4; object-fit: cover;
+            border-radius: 8px; cursor: pointer; transition: 0.2s;
+            background: #ddd;
         }
         .grid img:hover { transform: scale(1.02); box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
         .lightbox {
@@ -30,39 +42,168 @@
     </style>
 </head>
 <body>
+<div class="toolbar">
+    <h1>🖼️ 图片集</h1>
+    <div>
+        <span class="status" id="status">加载中…</span>
+        <button class="btn" id="downloadBtn" disabled>📦 下载全部图片</button>
+    </div>
+</div>
 <div id="app"><div class="loading">加载中...</div></div>
 <div class="lightbox" id="lightbox" onclick="this.classList.remove('show')">
     <img id="lightboxImg" src="" alt="preview" />
 </div>
 
 <script>
-(async function() {
-    try {
-        const res = await fetch('./minimax_history_2026-06-26.json');  // 请确保文件名正确
-        if (!res.ok) throw new Error('网络错误 ' + res.status);
-        const data = await res.json();
-        
-        let allUrls = [];
-        data.forEach(item => {
-            if (item.urls && Array.isArray(item.urls)) {
-                allUrls = allUrls.concat(item.urls);
+(function() {
+    const app = document.getElementById('app');
+    const statusEl = document.getElementById('status');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    let totalImages = 0;
+    let loadedCount = 0;
+    let base64List = [];          // 存储所有 base64 数据（不含前缀）
+    let imageNames = [];          // 对应的文件名
+
+    // 更新状态
+    function updateStatus() {
+        statusEl.textContent = `已加载 ${loadedCount} / ${totalImages}`;
+        if (loadedCount === totalImages && totalImages > 0) {
+            downloadBtn.disabled = false;
+            statusEl.textContent = `✅ 全部就绪 (${totalImages} 张)`;
+        }
+    }
+
+    // 将图片转为 base64（设置 crossOrigin 以支持跨域）
+    function convertToBase64(img, index) {
+        return new Promise((resolve, reject) => {
+            // 如果图片已经加载完成，直接绘制；否则等待 load 事件
+            if (img.complete && img.naturalWidth > 0) {
+                doConvert(img, index).then(resolve).catch(reject);
+            } else {
+                img.onload = () => {
+                    doConvert(img, index).then(resolve).catch(reject);
+                };
+                img.onerror = () => reject(new Error(`图片加载失败: ${img.src}`));
             }
         });
-
-        if (allUrls.length === 0) {
-            document.getElementById('app').innerHTML = '<p style="text-align:center;color:#999;">没有找到图片</p>';
-            return;
-        }
-
-        let html = '<div class="grid">';
-        allUrls.forEach(url => {
-            html += `<img src="${url}" loading="lazy" onclick="openLightbox(this.src)" />`;
-        });
-        html += '</div>';
-        document.getElementById('app').innerHTML = html;
-    } catch (e) {
-        document.getElementById('app').innerHTML = `<p style="text-align:center;color:#c33;">加载失败：${e.message}</p>`;
     }
+
+    async function doConvert(img, index) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const dataUrl = canvas.toDataURL('image/png');   // 也可用 image/jpeg
+        // 提取纯 base64 部分
+        const base64 = dataUrl.split(',')[1];
+        // 生成文件名：基于序号和原 URL 末尾片段
+        const urlParts = img.src.split('/');
+        let fileName = urlParts[urlParts.length - 1].split('?')[0];
+        if (!fileName || fileName.length < 5) {
+            fileName = `image_${index}.png`;
+        } else {
+            // 保留原始扩展名，若无则补 .png
+            if (!fileName.includes('.')) fileName += '.png';
+        }
+        return { base64, fileName };
+    }
+
+    // 主流程
+    async function init() {
+        try {
+            // 1. 获取 JSON 数据
+            const res = await fetch('./minimax_history_2026-06-26.json');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            // 2. 提取所有图片 URL
+            const allUrls = [];
+            data.forEach(item => {
+                if (item.urls && Array.isArray(item.urls)) {
+                    item.urls.forEach(u => allUrls.push(u));
+                }
+            });
+
+            if (allUrls.length === 0) {
+                app.innerHTML = '<p style="text-align:center;color:#999;">没有找到图片</p>';
+                statusEl.textContent = '无图片';
+                return;
+            }
+
+            totalImages = allUrls.length;
+            updateStatus();
+
+            // 3. 构建网格并开始加载
+            let gridHtml = '<div class="grid">';
+            allUrls.forEach((url, idx) => {
+                gridHtml += `<img id="img_${idx}" crossorigin="anonymous" src="${url}" loading="lazy" onclick="openLightbox(this.src)" />`;
+            });
+            gridHtml += '</div>';
+            app.innerHTML = gridHtml;
+
+            // 4. 逐个转换 base64
+            const promises = allUrls.map((url, idx) => {
+                const img = document.getElementById(`img_${idx}`);
+                return convertToBase64(img, idx)
+                    .then(result => {
+                        base64List[idx] = result.base64;
+                        imageNames[idx] = result.fileName;
+                        loadedCount++;
+                        updateStatus();
+                    })
+                    .catch(err => {
+                        console.warn(err.message);
+                        loadedCount++;  // 即使失败也计数，避免卡住
+                        updateStatus();
+                    });
+            });
+
+            await Promise.allSettled(promises);
+            // 全部完成（可能有失败）
+            if (loadedCount === totalImages) {
+                downloadBtn.disabled = false;
+                statusEl.textContent = `✅ 全部就绪 (${totalImages} 张)`;
+            } else {
+                statusEl.textContent = `⚠️ 完成 ${loadedCount}/${totalImages} (部分失败)`;
+            }
+
+        } catch (e) {
+            app.innerHTML = `<p style="text-align:center;color:#c33;">加载失败：${e.message}</p>`;
+            statusEl.textContent = '❌ 出错';
+        }
+    }
+
+    // 下载全部图片（打包 ZIP）
+    downloadBtn.addEventListener('click', async function() {
+        if (base64List.length === 0) return;
+        this.disabled = true;
+        this.textContent = '⏳ 打包中…';
+
+        try {
+            const zip = new JSZip();
+            for (let i = 0; i < base64List.length; i++) {
+                if (base64List[i]) {
+                    zip.file(imageNames[i], base64List[i], { base64: true });
+                }
+            }
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'images.zip';
+            link.click();
+            URL.revokeObjectURL(link.href);
+        } catch (e) {
+            alert('打包失败：' + e.message);
+        } finally {
+            this.disabled = false;
+            this.textContent = '📦 下载全部图片';
+        }
+    });
+
+    // 启动
+    init();
 })();
 
 function openLightbox(src) {
