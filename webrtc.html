@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>WebRTC 手动信令示例</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e6e8ec;
+    --muted: #8b93a3;
+    --accent: #5eead4;
+    --accent-dim: #1f3d38;
+    --warn: #f0b429;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    padding: 24px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 14px;
+    margin: 0 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+  }
+  .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .step { font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+  textarea {
+    width: 100%;
+    height: 80px;
+    background: #0b0d12;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    padding: 8px;
+    resize: vertical;
+  }
+  button {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 6px;
+    margin-right: 6px;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .log {
+    margin-top: 16px;
+    background: #0b0d12;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    height: 140px;
+    overflow-y: auto;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .chatbox { display: flex; gap: 6px; margin-top: 10px; }
+  .chatbox input {
+    flex: 1;
+    background: #0b0d12;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .status {
+    font-size: 11px;
+    color: var(--warn);
+    margin-top: 6px;
+    min-height: 14px;
+  }
+</style>
+</head>
+<body>
+
+<h1>WebRTC 手动信令示例</h1>
+<div class="sub">左边是发起方（A），右边是接收方（B）。把 A 生成的文本复制给 B，再把 B 生成的文本复制回 A，即可建立点对点连接，之后聊天内容直接在两端之间传输，不经过任何服务器。可以把这个页面开两个标签页来测试。</div>
+
+<div class="grid">
+
+  <!-- 发起方 A -->
+  <div class="panel">
+    <h2><span class="dot" id="dotA"></span> 设备 A（发起方）</h2>
+
+    <button id="btnCreateOffer">1. 生成邀请码（Offer）</button>
+
+    <div class="step">→ 把下面这段文本发给设备 B：</div>
+    <textarea id="offerOut" readonly placeholder="点击上面按钮生成..."></textarea>
+
+    <div class="step">← 粘贴设备 B 给你的应答码（Answer）：</div>
+    <textarea id="answerIn" placeholder="粘贴 B 生成的 Answer 文本"></textarea>
+    <button id="btnConnectA" disabled>2. 建立连接</button>
+
+    <div class="status" id="statusA"></div>
+
+    <div class="chatbox">
+      <input id="msgA" placeholder="连接成功后可以发消息…" disabled>
+      <button id="sendA" disabled>发送</button>
+    </div>
+    <div class="log" id="logA"></div>
+  </div>
+
+  <!-- 接收方 B -->
+  <div class="panel">
+    <h2><span class="dot" id="dotB"></span> 设备 B（接收方）</h2>
+
+    <div class="step">← 粘贴设备 A 给你的邀请码（Offer）：</div>
+    <textarea id="offerIn" placeholder="粘贴 A 生成的 Offer 文本"></textarea>
+    <button id="btnCreateAnswer">1. 生成应答码（Answer）</button>
+
+    <div class="step">→ 把下面这段文本发回设备 A：</div>
+    <textarea id="answerOut" readonly placeholder="生成后显示在这里..."></textarea>
+
+    <div class="status" id="statusB"></div>
+
+    <div class="chatbox">
+      <input id="msgB" placeholder="连接成功后可以发消息…" disabled>
+      <button id="sendB" disabled>发送</button>
+    </div>
+    <div class="log" id="logB"></div>
+  </div>
+
+</div>
+
+<script>
+const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+// 注：STUN 服务器只用来帮忙探测公网地址（跨网络 NAT 穿透需要），
+// 不传输任何业务数据，也不是"信令服务器"。局域网测试甚至可以不需要它。
+
+function log(which, text) {
+  const el = document.getElementById(which === "A" ? "logA" : "logB");
+  const line = document.createElement("div");
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(which, text) {
+  document.getElementById(which === "A" ? "statusA" : "statusB").textContent = text;
+}
+
+function setConnected(which) {
+  document.getElementById(which === "A" ? "dotA" : "dotB").classList.add("on");
+  document.getElementById(which === "A" ? "msgA" : "msgB").disabled = false;
+  document.getElementById(which === "A" ? "sendA" : "sendB").disabled = false;
+}
+
+// 等待 ICE candidate 收集完成，这样只需要交换一次完整 SDP，不用交换多轮 candidate
+function waitForIceGathering(pc) {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    function check() {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", check);
+        resolve();
+      }
+    }
+    pc.addEventListener("icegatheringstatechange", check);
+  });
+}
+
+/* ---------------- 设备 A：发起方 ---------------- */
+let pcA, channelA;
+
+document.getElementById("btnCreateOffer").onclick = async () => {
+  pcA = new RTCPeerConnection(config);
+  channelA = pcA.createDataChannel("sync");
+
+  channelA.onopen = () => { setConnected("A"); setStatus("A", "已连接 ✓"); log("A", "数据通道已打开"); };
+  channelA.onmessage = (e) => log("A", "收到: " + e.data);
+
+  const offer = await pcA.createOffer();
+  await pcA.setLocalDescription(offer);
+  setStatus("A", "正在收集网络信息…");
+
+  await waitForIceGathering(pcA);
+
+  document.getElementById("offerOut").value = JSON.stringify(pcA.localDescription);
+  document.getElementById("btnConnectA").disabled = false;
+  setStatus("A", "邀请码已生成，发给设备 B");
+  log("A", "Offer 已生成");
+};
+
+document.getElementById("btnConnectA").onclick = async () => {
+  try {
+    const answer = JSON.parse(document.getElementById("answerIn").value);
+    await pcA.setRemoteDescription(answer);
+    setStatus("A", "正在建立连接…");
+    log("A", "已收到 Answer，正在连接");
+  } catch (err) {
+    setStatus("A", "应答码格式有误，请检查粘贴内容");
+  }
+};
+
+document.getElementById("sendA").onclick = () => {
+  const input = document.getElementById("msgA");
+  if (input.value && channelA && channelA.readyState === "open") {
+    channelA.send(input.value);
+    log("A", "发送: " + input.value);
+    input.value = "";
+  }
+};
+
+/* ---------------- 设备 B：接收方 ---------------- */
+let pcB;
+
+document.getElementById("btnCreateAnswer").onclick = async () => {
+  let offer;
+  try {
+    offer = JSON.parse(document.getElementById("offerIn").value);
+  } catch (err) {
+    setStatus("B", "邀请码格式有误，请检查粘贴内容");
+    return;
+  }
+
+  pcB = new RTCPeerConnection(config);
+
+  pcB.ondatachannel = (event) => {
+    const channelB = event.channel;
+    channelB.onopen = () => { setConnected("B"); setStatus("B", "已连接 ✓"); log("B", "数据通道已打开"); };
+    channelB.onmessage = (e) => log("B", "收到: " + e.data);
+
+    document.getElementById("sendB").onclick = () => {
+      const input = document.getElementById("msgB");
+      if (input.value && channelB.readyState === "open") {
+        channelB.send(input.value);
+        log("B", "发送: " + input.value);
+        input.value = "";
+      }
+    };
+  };
+
+  await pcB.setRemoteDescription(offer);
+  const answer = await pcB.createAnswer();
+  await pcB.setLocalDescription(answer);
+  setStatus("B", "正在收集网络信息…");
+
+  await waitForIceGathering(pcB);
+
+  document.getElementById("answerOut").value = JSON.stringify(pcB.localDescription);
+  setStatus("B", "应答码已生成，发回设备 A");
+  log("B", "Answer 已生成");
+};
+</script>
+
+</body>
+</html>
